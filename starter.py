@@ -3,6 +3,7 @@ import urllib.parse
 import socket 
 import sys
 import importlib
+import os
 
 DEV_MODE = True
 
@@ -72,6 +73,7 @@ class RequestHandler(AccessManagerRequestHandler):
 
 
   def access_manager(self):
+
     parts = self.path.split('?', 1)  # /user/auth?hash=1a2d==&p=50/50&q=who?&x=10&y=20&x=30&json
 
     # проверка если запрос на файл, то прекращаем обработчик и отправляем файл в методе
@@ -133,39 +135,98 @@ class RequestHandler(AccessManagerRequestHandler):
       self.send_error(500, message)
 
 
-  def check_static_asset(self, path_file : str) -> bool:
-    '''Проверяет является ли запрос на существующий файл и отправляем его'''
-    if self.command != "GET": 
-      return False
-
-    if (path_file.endswith('/')
-      or '../' in path_file
-      or not '.' in path_file):
-      return False
-
-    path = './http/static' + path_file
-    ext = path.rsplit('.', 1)[1]
-    allowed_media_types = {
-      "png": "image/png",
-      "jpg": "image/jpeg",
-      "css": "text/css",
-      "js": "text/javascript"
+    # 1. Тот самый полный список типов (белый список)
+    allowed_types = {
+        '.png':  'image/png',
+        '.jpg':  'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif':  'image/gif',
+        '.ico':  'image/x-icon',
+        '.css':  'text/css',
+        '.js':   'application/javascript',
+        '.html': 'text/html; charset=utf-8'
     }
-    if ext in allowed_media_types:
-      try:
-        with open(path, "rb") as file :
-          self.send_response(200, "OK")
-          self.send_header("Content-Type", allowed_media_types[ext])
-          self.end_headers()
-          self.wfile.write(file.read())
-          return True
-      except Exception as err :
-        print(err)
-        return
-    else:
-      self.send_error(415, f"Unsupported Media Type: {ext}")
-      return True
 
+    # 2. Получаем расширение файла
+    ext = os.path.splitext(request_path)[1].lower()
+
+    # Если в пути вообще нет расширения (точки), значит это точно не статика.
+    # Возвращаем False, чтобы сервер пошел искать контроллер.
+    if not ext:
+        return False
+
+    # 3. Если расширение ЕСТЬ, мы берем управление на себя.
+    # Даже если файла нет или расширение плохое, мы возвращаем True в конце,
+    # чтобы сервер НЕ пытался искать контроллер "img_controller" или ".png_controller".
+
+    # Проверка на белый список (Задание: 415 ошибка)
+    if ext not in allowed_types:
+        self.send_error(415, f"Extension {ext} is not allowed")
+        return True
+
+    # 4. Формируем путь к файлу. 
+    # lstrip("/") убирает начальный слеш, чтобы os.path.join склеил все правильно.
+    file_path = os.path.join("static", request_path.lstrip("/"))
+
+    # 5. Пытаемся открыть и отправить
+    try:
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            with open(file_path, "rb") as f:
+                content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", allowed_types[ext])
+                self.send_header("Content-Length", len(content))
+                self.end_headers()
+                self.wfile.write(content)
+        else:
+            # Если расширение правильное (напр. .png), но файла нет на диске
+            self.send_error(404, f"Static file not found: {request_path}")
+    except Exception as e:
+        self.send_error(500, f"Server error: {e}")
+
+    return True
+
+
+  def check_static_asset(self, request_path):
+    # белый список
+    allowed_types = {
+        '.png':  'image/png',
+        '.jpg':  'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.gif':  'image/gif',
+        '.ico':  'image/x-icon',
+        '.css':  'text/css',
+        '.js':   'application/javascript',
+        '.html': 'text/html; charset=utf-8'
+    }
+
+    ext = os.path.splitext(request_path)[1].lower()
+
+    if not ext:
+        return False
+
+    # 415 ошибка
+    if ext not in allowed_types:
+        self.send_error(415, f"Extension {ext} is not allowed")
+        return True
+    
+    file_path = os.path.join("static", request_path.lstrip("/"))
+
+    try:
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            with open(file_path, "rb") as f:
+                content = f.read()
+                self.send_response(200)
+                self.send_header("Content-Type", allowed_types[ext])
+                self.send_header("Content-Length", len(content))
+                self.end_headers()
+                self.wfile.write(content)
+        else:
+            self.send_error(404, f"Static file not found: {request_path}")
+    except Exception as e:
+        self.send_error(500, f"Server error: {e}")
+
+    return True
 
 def main():
   host = '127.0.0.1'
