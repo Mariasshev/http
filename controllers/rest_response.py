@@ -11,7 +11,6 @@ class RestStatus:
             "phrase": self.phrase
         }
 
-    # Статические методы для быстрых ответов
     @staticmethod
     def OK(): return RestStatus(True, 200, "OK")
     
